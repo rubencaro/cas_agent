@@ -10,7 +10,7 @@ defmodule CasAgent do
   """
   def start do
     :ets.new(:CAS_table, [:public,:set,:named_table])
-    Agent.start_link(fn -> %{} end, name: :CAS_agent)
+    Agent.start_link(fn -> [] end, name: :CAS_agent)
     :ok
   end
 
@@ -19,7 +19,8 @@ defmodule CasAgent do
     key from the ETS table, and `timestamp` the last modification time.
   """
   def read(key) do
-
+    [{_, data}] = :ets.lookup(:CAS_table, key)
+    data
   end
 
   @doc """
@@ -30,24 +31,44 @@ defmodule CasAgent do
     It returns {:ok, %{v: value, ts: timestamp}} if it worked within the given
     number of retries. {:error, :failed_cas} otherwise.
   """
-  def cas(key,fun, retries \\ 3) do
+  def cas(key, fun, retries \\ 3) do
+    %{v: value, ts: ts} = read(key)
 
+    case write(key, ts, fun) do
+      {:ok, res} -> {:ok, res}
+      {:error, :wrong_ts} when retries > 0 -> cas(key, fun, retries - 1)
+      _ -> {:error, :failed_cas}
+    end
   end
 
   @doc """
     Updates the value for the given key using the value returned by the given
     function. The function will be passed the current value.
-    The given `prev_ts` must match the current value of `ts` on table.
-    `{:error, :wrong_ts}` is otherwise returned.
+    It returrns {:ok, %{v: value, ts: timestamp}} if it worked.
+    The given `prev_ts` must match the current value of `ts` on table at the
+    moment of writing. `{:error, :wrong_ts}` is otherwise returned.
   """
   def write(key, prev_ts, fun) do
+    Agent.get_and_update :CAS_agent, fn(_)->
+      # use the Agent process to serialize operations
 
+      %{v: value, ts: ts} = read(key)
+
+      if prev_ts == ts do
+        new_value = fun.(value)
+        data = %{v: new_value, ts: new_ts}
+        true = :ets.insert(:CAS_table, {key, data})
+        {{:ok, data}, []}
+      else
+        {{:error, :wrong_ts}, []}
+      end
+    end
   end
 
   @doc """
     Get timestamp in seconds, microseconds, or nanoseconds
   """
-  def ts(scale \\ :seconds) do
+  def new_ts(scale \\ :seconds) do
     {mega, sec, micro} = :os.timestamp
     t = mega * 1_000_000 + sec
     case scale do

@@ -59,10 +59,10 @@ defmodule CasAgentTest do
       assert v >= 0 && v <= 10
     end
 
-    ws = for i <- 0..9, into:[], do: Task.async(wt)
-    rs = for i <- 0..9, into:[], do: Task.async(rd)
+    ws = for _ <- 0..9, into: [], do: Task.async(wt)
+    rs = for _ <- 0..9, into: [], do: Task.async(rd)
 
-    for t <- ws ++ rs, do: t.await
+    for t <- ws ++ rs, do: Task.await(t)
 
     %{v: v} = C.read(:a)
     assert v == 10
